@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009" 
+			   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" 
+			   xmlns:components="ru.teachbase.components.*"
+			   applicationComplete="initializeHandler(event)"
+			   width="384" height="350" backgroundColor="0xF4F4F4">
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import mx.core.FlexGlobals;
+			import mx.rpc.Responder;
+			import mx.utils.ObjectUtil;
+			
+			import ru.teachbase.utils.Logger;
+			import ru.teachbase.utils.Strings;
+			import ru.teachbase.utils.requestUserMediaAccess;
+			
+			private static const RTMP_URL:String = '31.186.97.86';
+			private static const TIME_LIMIT:Number = 600;
+			
+			private var _camera:Camera;
+			private var _mic:Microphone;
+			private var _connetion:NetConnection;
+			private var _netStreamOut:NetStream;
+			private var _netStreamIn:NetStream;
+			
+			private var _video:Video = new Video();
+			private var _reccordingTimer:Timer = new Timer(1000,0);
+			private var _timeRemain:Number = TIME_LIMIT;
+			private var _fileName:String = "";
+			
+			protected function initializeHandler(event:Event = null):void
+			{
+				_connetion = new NetConnection();
+				_connetion.addEventListener(NetStatusEvent.NET_STATUS, onNetStatus);
+				_connetion.connect('rtmp://' + RTMP_URL + '/rtmp');	
+				videoContainer.addChild(_video);
+			}
+			
+			private function generateFileName():String{
+				var str:String = "";
+				const date:Date = new Date();
+				str +=  FlexGlobals.topLevelApplication.parameters['course_id'] ? FlexGlobals.topLevelApplication.parameters['course_id'] : "default";
+				str += "_";
+				str += FlexGlobals.topLevelApplication.parameters['user_id'] ? FlexGlobals.topLevelApplication.parameters['user_id'] : "default";
+				str += "_";
+				str += date.getTime();
+				str += ".flv";
+				return str;
+			}
+			
+			protected function onNetStatus(event:NetStatusEvent):void
+			{
+				Logger.log(event.info.code, "net connection status");
+				
+				switch (event.info.code) {
+					case "NetConnection.Connect.Success":
+						initCamera();
+						break;
+					default:
+						currentState = errorState.name;
+						errorLabel.text = 'Ошибка подключения к серверу';
+				}
+				
+			}
+			
+			private function initCamera():void{
+				requestUserMediaAccess(-2,-1, new mx.rpc.Responder(camInitSuccess, falture),stage);
+				
+				function falture(flag:Boolean):void{
+					currentState = errorState.name;
+					errorLabel.text = "Необходимо включить камеру";
+				}
+				
+			}
+			
+			private function camInitSuccess(flag:Boolean = true):void{
+				if(!_camera){
+					_camera = Camera.getCamera();
+					_camera.setLoopback(true);
+					_camera.setQuality(0,100);
+					_camera.setMode(480,360, 15, false);
+				}
+				//_camera.addEventListener(StatusEvent.STATUS, statusHandler); 
+				
+				_video.attachCamera(_camera);
+				
+				
+				
+				_video.width = 352;
+				_video.height = 264;
+		
+				currentState = normal.name;
+				!_mic && (_mic = getMicrophone());
+				if (!_mic) 
+					Logger.log('микрофон не подключён или неисправен, звук не воспроизведётся','mic');
+			}
+			
+			private function statusHandler(evt:StatusEvent):void{
+
+ 			}
+			
+			protected function onReccordTimer(event:TimerEvent):void
+			{
+				_timeRemain--;
+				if (_timeRemain <= 0) {
+					onReccordStop();
+				}
+				timeRemainText.text = Strings.digits(_timeRemain);
+			}
+			
+			private var _curVal:int = 0;
+			private var _timer:Timer = new Timer(1000,0);
+			private var _waitForBufferEmpty:Boolean = false;
+			
+			private function showSequense():void{
+				_timer.addEventListener(TimerEvent.TIMER, onTimer);
+				_timer.start()
+			}
+			
+			protected function onTimer(event:TimerEvent):void
+			{
+				for (var i:int=0; i<prestartNumbers.numChildren; i++) {
+					prestartNumbers.getElementAt(i).visible = false;
+				}
+				
+				if (_curVal >= prestartNumbers.numElements) {
+					_timer.reset();
+					_timer.removeEventListener(TimerEvent.TIMER, onTimer);
+					startReccord();
+					_curVal = 0;
+					return;
+				}
+				prestartNumbers.getElementAt(_curVal).visible = true;
+				_curVal++;
+				
+			}
+			
+			private function startReccord():void{
+				_timeRemain = TIME_LIMIT;
+				_fileName = generateFileName();
+				
+				_netStreamOut = new NetStream(_connetion);
+				_video.attachCamera(_camera);
+				
+				var customClient:Object = new Object();
+								
+				customClient.onMetaData = function(metadata:Object):void {
+					Logger.log(metadata,"onMetadata ");
+				};
+				
+				_netStreamOut.client = customClient;
+				var h264Settings:H264VideoStreamSettings = new H264VideoStreamSettings();
+				h264Settings.setProfileLevel(H264Profile.BASELINE, H264Level.LEVEL_1);
+				_netStreamOut.videoStreamSettings = h264Settings;
+								
+				_camera && _netStreamOut.attachCamera(_camera);
+				_mic && _netStreamOut.attachAudio(_mic);
+				
+				_netStreamOut.addEventListener(NetStatusEvent.NET_STATUS,function(e:NetStatusEvent):void{ Logger.log(e.info.code,'publish');});
+				_netStreamOut.publish(_fileName+'?source_timeout=0','record');
+				
+				_reccordingTimer.addEventListener(TimerEvent.TIMER,onReccordTimer)
+				_reccordingTimer.start();
+				
+				currentState = reccording.name;
+			}
+			
+
+			
+			protected function onReccordStartClick(event:MouseEvent):void
+			{
+				currentState = prepare.name;
+				showSequense();
+				
+			}
+			
+			protected function onSaveVideoClick(event:MouseEvent):void
+			{
+				Logger.log('http://'+RTMP_URL + ':8082/'+_fileName,'filename');
+				if(ExternalInterface.available){
+					currentState = uploading.name;
+					ExternalInterface.addCallback('videoTransferCompleted', onVideoTransferCompleted)
+					ExternalInterface.call('GetRecordedVideo', 'http://'+RTMP_URL + ':8082/'+_fileName);
+				}
+				
+			}
+			
+			public function onVideoTransferCompleted():void{
+				currentState = normal.name;
+				camInitSuccess();
+			}
+			
+			private function play():void{
+				_netStreamIn = new NetStream(_connetion);
+				_netStreamIn.bufferTime = 2;
+				var customClient:Object = new Object();
+				
+				customClient.onMetaData = function(metadata:Object):void {
+					Logger.log(metadata, "play metadata");
+				};
+				
+								
+				_netStreamIn.client = customClient;
+				
+				
+				_video.attachNetStream(_netStreamIn);
+				
+				
+				
+				_netStreamIn.addEventListener(NetStatusEvent.NET_STATUS, onPlayStatus);
+				_netStreamIn.addEventListener(AsyncErrorEvent.ASYNC_ERROR,function(e:AsyncErrorEvent):void{ Logger.log(e.text,'error');});
+				_netStreamIn.addEventListener(IOErrorEvent.IO_ERROR,function(e:IOErrorEvent):void{Logger.log(e.text,'error');});
+				_netStreamIn.play(_fileName);
+				
+				
+				currentState = playing.name;
+			}
+			
+			private function onPlayStatus(evt:NetStatusEvent):void{
+				switch (evt.info.code) {
+					case "NetConnection.Connect.Closed":
+						_netStreamIn.removeEventListener(NetStatusEvent.NET_STATUS, onPlayStatus);
+						currentState = reccorded.name;
+						_netStreamIn = null;
+						//_video.attachCamera(null);// TODO: может оставить?
+						break;
+					case "NetStream.Play.Stop":
+						if(_netStreamIn.bufferLength>0){
+							_waitForBufferEmpty = true;
+						}else{
+							_netStreamIn.removeEventListener(NetStatusEvent.NET_STATUS, onPlayStatus);
+							currentState = reccorded.name;
+						}
+						//_netStreamIn = null;
+						//_video.attachCamera(null);// TODO: может оставить?
+						break;
+					case "NetStream.Buffer.Empty":
+						if(_waitForBufferEmpty){
+							_netStreamIn.removeEventListener(NetStatusEvent.NET_STATUS, onPlayStatus);
+							currentState = reccorded.name;
+						}
+					break;
+				}
+			}
+			
+			
+			protected function onReccordStop(event:Event = null):void
+			{
+				
+				_netStreamOut.attachCamera(null);
+				_netStreamOut.attachAudio(null);
+				_netStreamOut.dispose();
+			//	_camera = null;
+				_video.attachCamera(null);// TODO: может оставить?
+				
+				
+				currentState = reccorded.name;
+			}
+			
+			private function stopPlaying(evt:Event = null):void{
+				_netStreamIn.dispose()
+				//_netStreamIn = null;
+				_video.attachNetStream(null);// TODO: может оставить?
+			//	_camera = null;
+				currentState = reccorded.name;
+			}
+			
+			
+			//------------ get / set -------------//
+			
+			
+			private function getMicrophone():Microphone {
+				var microphone:Microphone;
+				var options:MicrophoneEnhancedOptions = new MicrophoneEnhancedOptions();
+				options.mode = MicrophoneEnhancedMode.FULL_DUPLEX;
+				options.echoPath = 128;
+				options.nonLinearProcessing = true;
+				microphone = Microphone.getEnhancedMicrophone();
+				if(!microphone){return null};
+				microphone.enhancedOptions = options;
+				microphone.gain = 80;
+				microphone.codec = SoundCodec.SPEEX;
+				microphone.framesPerPacket = 2;
+				microphone.rate = 44;
+				microphone.setSilenceLevel(0);
+				microphone.encodeQuality = 10;
+				microphone.setLoopBack(false);
+				microphone.setUseEchoSuppression(true);
+				return microphone;
+			}
+			
+			
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State id="loadingState" name="loadingState"/>
+		<s:State id="normal" name="normal"/>
+		<s:State id="prepare" name="prepare"/>
+		<s:State id="reccording" name="reccording"/>
+		<s:State id="reccorded" name="reccorded"/>
+		<s:State id="playing" name="playing"/>
+		<s:State id="errorState" name="errorState"/>
+		<s:State id="uploading" name="uploading"/>
+	</s:states>
+	
+	<s:VGroup width="100%" height="100%" gap="8">
+		<s:Group id="up" width="100%" height="300">
+			<s:Rect width="100%" height="100%" top="4" left="4" right="4" bottom="4">
+				<s:fill>
+					<s:SolidColor color="0xe3e8ed" alpha="1"/>
+				</s:fill>
+				<!--s:filters>
+					<s:DropShadowFilter alpha="1" blurX="1" blurY="1" strength=".1" color="0x000000"/>
+				</s:filters-->
+			</s:Rect>
+			
+			<mx:UIComponent id="videoContainer" horizontalCenter="0" verticalCenter="0"  width="352" height="264" excludeFrom="errorState,uploading"/>
+			<s:Group right="10" top="10" includeIn="reccording">
+				<s:Image source="@Embed('../assets/rounded_counter.png')" />
+				<s:Label id="timeRemainText" text="10:00" color="0xFFFFFF" fontSize="13" left="31" top="8"/>
+			</s:Group>
+				
+			<s:Group horizontalCenter="0" verticalCenter="0" id="prestartNumbers">
+				<s:Image source="@Embed('../assets/three.png')"  visible="false"/>
+				<s:Image source="@Embed('../assets/two.png')" visible="false" />
+				<s:Image source="@Embed('../assets/one.png')"  visible="false"/>
+			</s:Group>
+			
+			<s:Group horizontalCenter="0" verticalCenter="0" id="playButton" includeIn="reccorded">
+				<s:Button skinClass="ru.teachbase.skin.SimpleButtonSkin" icon="@Embed('../assets/play_button.png')"  click="play()"/>
+			</s:Group>
+			<s:Group width="100%" height="100%" includeIn="normal">
+				<components:CustomSkinableButton iconOver="@Embed('../assets/bigin_reccord_hover.png')" iconUp="@Embed('../assets/bigin_reccord.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" 
+												 click="onReccordStartClick(event)" horizontalCenter="0" bottom="40" />
+			</s:Group>
+		</s:Group>
+		<s:Group id="down" width="100%" height="46">
+			<s:HGroup horizontalCenter="0" includeIn="reccorded">
+				<components:CustomSkinableButton iconOver="@Embed('../assets/save_video_hover.png')" iconUp="@Embed('../assets/save_video.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" click="onSaveVideoClick(event)"/>
+				<components:CustomSkinableButton iconOver="@Embed('../assets/rewrite_hover.png')" iconUp="@Embed('../assets/rewrite.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" click="camInitSuccess(); onReccordStartClick(event)"/>
+			</s:HGroup>
+			<s:Group includeIn="reccording" width="100%">
+				<components:CustomSkinableButton iconOver="@Embed('../assets/end_video_hover.png')" iconUp="@Embed('../assets/end_reccord.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" click="onReccordStop(event)" horizontalCenter="0"/>
+			</s:Group>
+			<s:Group includeIn="playing" width="100%">
+				<components:CustomSkinableButton iconOver="@Embed('../assets/stop_playing_hover.png')" iconUp="@Embed('../assets/stop_playing.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" click="stopPlaying(event)" horizontalCenter="0"/>
+			</s:Group>
+		</s:Group>
+	</s:VGroup>
+	<s:Group width="100%" height="100%" includeIn="uploading">
+		<s:BusyIndicator rotationInterval="50" width="60" height="60" symbolColor="0x80bae6" horizontalCenter="0" verticalCenter="-20"/>
+	</s:Group>
+	<s:Group width="100%" height="100%" includeIn="errorState" >
+		<s:Label id="errorLabel" horizontalCenter="0" verticalCenter="-20" fontSize="12" color="0x000000" text="Ошибка!!!" verticalAlign="middle" textAlign="center"/>
+		<components:CustomSkinableButton iconOver="@Embed('../assets/reload_hover.png')" iconUp="@Embed('../assets/reload.png')" skinClass="ru.teachbase.skin.CustomSkiningButtonSkin" click="initializeHandler()" horizontalCenter="0"/>
+		
+	</s:Group>
+</s:Application>
