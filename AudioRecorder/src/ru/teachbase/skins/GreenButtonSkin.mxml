@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<s:SparkSkin xmlns:fx="http://ns.adobe.com/mxml/2009" 
+             xmlns:s="library://ns.adobe.com/flex/spark" 
+             xmlns:fb="http://ns.adobe.com/flashbuilder/2009"
+             minWidth="21" minHeight="21" 
+             alpha.disabled="0.5">
+     
+    <fx:Metadata>
+        <![CDATA[ 
+       [HostComponent("spark.components.Button")]
+        ]]>
+    </fx:Metadata>
+    
+        
+    <!-- states -->
+    <s:states>
+        <s:State name="up" id="up"/>
+        <s:State name="over" />
+        <s:State name="down" />
+        <s:State name="disabled" />
+    </s:states>
+    
+ 
+	<s:HGroup width="100%" top="0" left="0" right="0" height="34" gap="0">
+		<s:Group>
+			<s:BitmapImage includeIn="up" source="@Embed('../assets/stop_reccod_button_left_up.png')" height="34" width="3"/>
+			<s:BitmapImage includeIn="down,over,disabled" source="@Embed('../assets/stop_reccod_button_left_down.png')" height="34" width="3"/>
+		</s:Group>
+		<s:Group width="100%">
+			<s:Image visible="{this.currentState != up.name }" source="@Embed('../assets/stop_reccod_button_center_down.png')" scaleMode="stretch" height="34" width="100%"/>
+			<s:Image includeIn="up" source="@Embed('../assets/stop_reccod_button_center_up.png')" scaleMode="stretch" height="34" width="100%"/>
+		</s:Group>
+		<s:Group>
+			<s:BitmapImage includeIn="up" source="@Embed('../assets/stop_reccod_button_right_up.png')" height="34" width="3"/>
+			<s:BitmapImage includeIn="down,over,disabled" source="@Embed('../assets/stop_reccod_button_right_down.png')" height="34" width="3"/>
+		</s:Group>
+	</s:HGroup>
+
+	<s:Label id="labelDisplay"
+             textAlign="center" 
+			 fontSize="13"
+			 fontFamily="HelveticaNeueBold"
+			 fontWeight="bold"
+             maxDisplayedLines="1" color="0xFFFFFF" 
+             horizontalCenter="0" verticalCenter="-1" verticalAlign="middle"
+             left="10" right="10" top="2" bottom="2">
+    </s:Label>
+    
+</s:SparkSkin>

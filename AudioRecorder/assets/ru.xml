@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<locale lang="en">
+	<components>
+		<component name="global">
+			<elements>
+			</elements>
+		</component>
+		<component name="module_settings">
+			<elements>
+				<element name="title"><![CDATA[Clear Chat]]></element>
+				<element name="close_button"><![CDATA[Close]]></element>
+				<element name="reccord_bage"><![CDATA[идёт запись]]></element>
+				<element name="recordAttention"><![CDATA[Запись может длится 5 минут]]></element>
+				<element name="save_button"><![CDATA[Сохранить]]></element>
+			</elements>
+		</component>
+	</components>
+</locale>

@@ -1,0 +1,577 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009" 
+			   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" 
+			   xmlns:comp="ru.teachbase.components.*"
+			   width="436" height="416" 
+			   backgroundAlpha="1" currentState="enterState" contentBackgroundColor="0xF3F3F3"
+			   backgroundColor="0xF3F3F3" addedToStage="creationCompleteHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			
+			import org.as3wavsound.WavSound;
+			import org.as3wavsound.WavSoundChannel;
+			import org.as3wavsound.sazameki.core.AudioSetting;
+			import org.bytearray.micrecorder.MicRecorder;
+			import org.bytearray.micrecorder.encoder.WaveEncoder;
+			
+			import ru.teachbase.utils.Logger;
+			import ru.teachbase.utils.Strings;
+			import ru.teachbase.utils.system.requestUserMediaAccess;
+			
+			private const MAX_TIME:int = 300;
+			
+			private var _imgURL:String;
+			private var _pageId:String = "0";
+			private var _mp3Url:String;
+			private var _mp3Length:String;
+			
+			private var _recordTimer:Timer;
+			private var _playTimer:Timer;
+			private var _countdownTimer:Timer;
+			
+			[Embed('assets/blinkedRedButton.swf', symbol='RedClip')]
+			public static const BlinckedClipClass:Class;
+			
+			private var _totalCount:int = 0;
+			
+			private var soundClip:ByteArray;
+			private var mic:Microphone;
+			
+			private var wavSound:ByteArray;
+			
+			private var _available:Boolean = false;
+			
+			private var wavPlayer:WavSound;
+			private var wavChannel:WavSoundChannel;
+			
+			private var recorder:MicRecorder;
+			private var _lang:String = "ru";
+			
+			private var _bgLoader:Loader;
+			
+			protected function creationCompleteHandler(event:Event):void
+			{
+				
+				requestUserMediaAccess(-1,-2,success,error,stage);
+				
+				function success(flag:Boolean):void{
+					_available = flag;
+				}
+				
+				Logger.log("console logger works");
+				
+				if(stage.loaderInfo && stage.loaderInfo.parameters) {
+					if(this.loaderInfo.parameters["bg_image"])
+						_imgURL = this.loaderInfo.parameters["bg_image"];
+					
+					if(this.loaderInfo.parameters["page_id"])
+						_pageId = this.loaderInfo.parameters["page_id"];
+					
+					if(this.loaderInfo.parameters["lang"])
+						_lang = this.loaderInfo.parameters["lang"];
+					
+					if(this.loaderInfo.parameters["file"]) 
+						_mp3Url = this.loaderInfo.parameters["file"];
+					
+	
+				}
+				
+				Logger.log(_imgURL, "bg_image");
+				Logger.log(_pageId, "page_id");
+				Logger.log(_lang, "lang");
+				Logger.log(_mp3Url, "file");
+				
+				if (_mp3Url && _mp3Url != "0") {
+					currentState = playOldState.name;
+					saveButton.label = "Закрыть";
+				}
+				
+				_bgLoader = new Loader();
+				
+				_bgLoader.contentLoaderInfo.addEventListener(Event.COMPLETE, onImageLoadingComplete);
+				_bgLoader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, function (e:*):void { 
+					Logger.log("IO_ERROR error caught ");	
+				});
+				
+				_bgLoader.contentLoaderInfo.addEventListener(SecurityErrorEvent.SECURITY_ERROR, function (e:*):void { 
+					Logger.log("SECURITY_ERROR error caught ");		
+				});
+				
+				try{
+					_bgLoader.load(new URLRequest(_imgURL), new LoaderContext(true, ApplicationDomain.currentDomain, SecurityDomain.currentDomain));
+				}catch(evt:*){
+					Logger.log("ERROR error while loading bg");	
+				}
+			}
+			
+			
+			private function onImageLoadingComplete(evt:Event):void{
+				_bgLoader.contentLoaderInfo.removeEventListener(Event.COMPLETE, onImageLoadingComplete);
+				var bitmap:Bitmap = _bgLoader.content as Bitmap;
+				bitmap.smoothing = true;
+				var cntRatio:Number = imageGroup.width / imageGroup.height;
+				var bmRatio:Number = bitmap.width / bitmap.height;
+				
+				if (cntRatio > bmRatio) {
+					bitmap.height = imageGroup.height;
+					bitmap.width = bitmap.height*bmRatio;
+				}else{
+					bitmap.width = imageGroup.width;
+					bitmap.height = bitmap.width/bmRatio;
+					
+				}
+				bitmap.x = (imageGroup.width- bitmap.width)/2
+				bitmap.y = (imageGroup.height- bitmap.height)/2
+				
+				busyIndicator.visible = false;
+				bgImage.addChild(bitmap);
+				
+			}
+			
+			private function onButtonClick(evt:Event):void{
+				switch (evt.target){
+					case reccordButton:
+						startRecord();
+						break;
+					case stopReccordButton:
+						stopRecording();
+						break;
+					case playButton:
+						if(currentState == playRecordState.name){
+							playSound();
+						}else{
+							playOldAudio();
+						}
+						break;
+					case pauseButton:
+						if(currentState == playRecordState.name){
+							stopSound();
+						}else{
+							stopOldSound();
+						}
+						break;
+					case saveButton:
+						if(currentState == playRecordState.name){
+							saveSound();
+						}else{
+							if (ExternalInterface.available)
+								ExternalInterface.call("cancelAudioRecord");
+							else
+								Logger.log("external interface does't avaliable");
+						}
+						
+						break;
+					case deleteButton:
+						if(currentState == playRecordState.name){
+							deleteCurrentRecord();
+						}else{
+							if (ExternalInterface.available)
+								ExternalInterface.call("deleteAudioRecord", _pageId);
+							else
+								Logger.log("external interface does't avaliable");
+						}
+						break;
+				}
+			}
+			
+			private var _curCount:int = 3;
+			private var chanel:SoundChannel;
+			private var _sound:Sound;
+			
+			private function deleteCurrentRecord():void{
+				currentState = enterState.name;
+				currentTimeField.text = Strings.digits(0);
+				_totalCount = 0; 
+			}
+			
+			private function playOldAudio():void{
+				var req:URLRequest = new URLRequest(_mp3Url);
+				_sound = new Sound(req);
+				_sound.addEventListener(Event.ID3, onId3Loaded);
+				chanel = _sound.play();
+				chanel.addEventListener(Event.SOUND_COMPLETE,onSoundComplete);
+				playButton.visible = false;
+				pauseButton.visible = true;
+			}
+			
+			private function onId3Loaded(evt:Event):void{
+				
+				_sound.removeEventListener(Event.ID3, onId3Loaded);
+				
+				for (var name:String in _sound.id3) {
+					Logger.log("id3 "+ name + " "  + _sound.id3[name]);
+				}
+				
+				if (!_sound.id3.TLEN)
+					return;
+				
+				playProgressBar.maxProgress = _totalCount =  Math.round(_sound.id3.TLEN);
+				startPlayTimer();
+			}
+			
+			private function onSoundComplete(evt:Event):void{
+				_sound.removeEventListener(Event.COMPLETE, onSoundComplete);
+				stopOldSound();
+			}
+			
+			private function stopOldSound():void{
+				chanel.stop();
+				playButton.visible = true;
+				pauseButton.visible = false;
+				playProgressBar.progress = 0;
+				stopPlayTimer();
+			}
+			
+			private function startRecord():void{
+				
+				busyIndicator.visible = false;
+				
+				_countdownTimer = new Timer(1000,0)
+				_countdownTimer.addEventListener(TimerEvent.TIMER, 	onCoundownTimer);
+				_countdownTimer.start();
+				countodownGroup.visible = true;
+				reccordButton.visible = false;
+			}
+
+			
+			private function onCoundownTimer(evt:Event):void{
+				
+				_curCount--;
+				
+				if (_curCount>0) {
+					if (countdownLabel){
+						countdownLabel.text = String(_curCount);
+					}
+					return;
+				}
+				
+				if(_countdownTimer) {
+					_countdownTimer.removeEventListener(TimerEvent.TIMER, onCoundownTimer);
+					_countdownTimer.stop();
+					_countdownTimer = null;
+				}
+				
+				reccordButton.visible = true;
+				countodownGroup.visible = false;
+				
+				currentState = recordState.name;
+				
+				var clip:MovieClip = new BlinckedClipClass();
+				
+				blinkedUI.addChild(clip);
+				
+				_recordTimer = new Timer(1000,0);
+				_recordTimer.addEventListener(TimerEvent.TIMER, onCountdownTimer);
+				_recordTimer.start();
+				
+				mic = Microphone.getMicrophone();
+				
+				if(!mic){
+					error('not_supported');
+					_available = false;
+					return;
+				}
+				
+				var _encoder:WaveEncoder = new WaveEncoder();
+				
+				mic.codec = SoundCodec.NELLYMOSER;
+				
+				recorder = new MicRecorder( _encoder, mic, 100, 11);
+				recorder.record();
+			
+				soundClip = new ByteArray();
+				
+				mic.addEventListener(SampleDataEvent.SAMPLE_DATA,sampleDataHandler);
+			}
+			
+			protected function sampleDataHandler(event:SampleDataEvent):void
+			{
+				while(event.data.bytesAvailable)
+				{
+					var sample:Number = event.data.readFloat();
+					soundClip.writeFloat(sample);
+				}			
+			}	
+			
+			private function onCountdownTimer(evt:Event):void{
+				_totalCount++;
+				updateTimerField(_totalCount);
+				
+				if (_totalCount > MAX_TIME)
+					stopRecording()
+					
+			}
+			
+			private function updateTimerField(val:int):void{
+				if(currentTimeField)
+					currentTimeField.text = Strings.digits(val);
+			}
+			
+			private function error(code:String):void{
+				trace("error ", code);
+			}
+			
+			public function stopRecording(event:Event = null):void
+			{
+				if (_recordTimer){
+					_recordTimer.stop();
+					_recordTimer.removeEventListener(TimerEvent.TIMER,onCountdownTimer);
+					_recordTimer = null;
+				}
+				
+				mic.removeEventListener(SampleDataEvent.SAMPLE_DATA,sampleDataHandler);
+				
+				recorder.stop();
+				
+				currentState = playRecordState.name;
+				
+				playProgressBar.maxProgress = _totalCount;
+			}
+			
+			private var _playCount:int = 0;
+			
+			public function playSound():void{
+				
+				if(!recorder.output){
+					error('no_audio in playSound');
+					return;
+				}
+				
+				playButton.visible = false;
+				pauseButton.visible = true;
+				
+				startPlayTimer();
+				
+				var sets:AudioSetting = new AudioSetting(2,44100,16);
+				wavPlayer = new WavSound(recorder.output);//,sets);
+				
+				wavChannel = wavPlayer.play();
+				
+			}
+			
+			
+			private function onPlayTimer(evt:Event):void{
+				
+				_playCount++;
+				
+				if(playProgressBar) {
+					playProgressBar.progress = _playCount;
+				}
+				
+				if (_playCount >= _totalCount) {
+					stopSound();
+				}
+			}
+			
+			private function startPlayTimer():void{
+				_playTimer = new Timer(1000,0);
+				_playTimer.addEventListener(TimerEvent.TIMER, onPlayTimer);
+				_playTimer.start();
+			}
+			
+			
+			private function stopPlayTimer():void{
+				if (_playTimer) {
+					_playTimer.stop();
+					_playTimer.removeEventListener(TimerEvent.TIMER, onPlayTimer);
+					_playTimer = null;
+				}
+			}
+			
+			public function stopSound():void{
+				
+				
+				playButton.visible = true;
+				pauseButton.visible = false;
+				
+				stopPlayTimer();
+				
+				if(playProgressBar) {
+					playProgressBar.progress = 0
+				}
+				
+				if (currentState == playRecordState.name) {
+					if(!wavChannel){
+						error('no_audio in stopSound');
+						return;
+					}
+					
+					wavChannel.stop();
+				}
+			}
+			
+			private var _uploadWavLoader:URLLoader;
+			private var _loadingTimer:Timer;
+			private var _saveProgress:int = 0;
+			
+			public function saveSound():void{
+				
+				if(!recorder.output){
+					Logger.log('no_audio in saveSouund');
+					return;
+				}
+				
+				currentState = saveState.name;
+				
+				var uploadRequest:URLRequest = new URLRequest("http://dev1.teachbase.ru/bitrix/components/newebils/course.edit_2_0/data.php?type=audio&listId="+_pageId);
+				uploadRequest.method = URLRequestMethod.POST;
+				uploadRequest.contentType = 'application/octet-stream';		
+				uploadRequest.data = recorder.output;
+				
+				
+				Logger.log("Wav size " + Math.round(recorder.output.length /1024) + "kb");
+				
+				_uploadWavLoader = new URLLoader();
+				_uploadWavLoader.addEventListener(Event.COMPLETE, onUploadComplete);
+				
+				try{
+					_uploadWavLoader.load(uploadRequest);
+				}catch(evt:*){
+					Logger.log("error while uploading wav");
+				}
+				
+				_loadingTimer = new Timer(500,0);
+				_loadingTimer.addEventListener(TimerEvent.TIMER, onTimer);
+				_loadingTimer.start();
+			}
+			
+			private function onTimer(evt:Event):void{
+				_saveProgress++;
+				
+				if (saveProgressBar)
+					saveProgressBar.progress =  _saveProgress/100;
+			}
+			
+			
+			protected function onUploadComplete(event:Event):void
+			{
+				if (_loadingTimer){
+					_loadingTimer.removeEventListener(TimerEvent.TIMER, onTimer);
+					_loadingTimer.stop();
+					_loadingTimer = null;
+				}
+				
+				saveProgressBar.progress = 1;
+				
+				var result:Object;
+				
+				try {
+					result = JSON.parse(_uploadWavLoader.data);
+				}catch (ex:*) {
+					Logger.log("can't parce json, wrong format");
+					return;
+				}
+				
+				var _docURL:String = result.url;
+				
+				if(!_docURL)
+					_docURL = "null";
+				
+				if(ExternalInterface.available)
+					ExternalInterface.call("finishAudioRecord", _docURL, _pageId);
+				else
+					Logger.log("external interface does't avaliable");
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<fx:Style>
+		@namespace s "library://ns.adobe.com/flex/spark";
+		@font-face {
+			src: url("../assets/fonts/HelveticaNeue-Bold.ttf");
+			fontFamily: "HelveticaNeueBold";
+			fontWeight: bold;
+			embedAsCFF: true;	
+		}
+		
+		@font-face {
+			src: url("../assets/fonts/HelveticaNeue.ttf");
+			fontFamily: "HelveticaNeueRegular";
+			embedAsCFF: true;	
+		}
+		
+	</fx:Style>
+	
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:states>
+		<s:State id="enterState" name="enterState" stateGroups="reccordGroup"/>
+		<s:State id="recordState" name="recordState" stateGroups="reccordGroup"/>
+		<s:State id="playRecordState" name="playRecordState" stateGroups="playGrouop"/>
+		<s:State id="playOldState" name="playOldState" stateGroups="playGrouop"/>
+		<s:State id="saveState" name="saveState"/>
+	</s:states>
+	<s:VGroup width="100%" height="100%" gap="26" paddingTop="13" paddingLeft="18" paddingRight="18" >
+		<s:Group id="titleGroup" height="19" width="100%">
+			<s:Label left="0" text="Запись аудиозаметки" fontSize="22" fontFamily="HelveticaNeueRegular" top="-5"/>
+			<s:HGroup id="reccodingBadgeGroup" right="0" includeIn="recordState"  height="100%">
+				<s:Group height="100%">
+					<s:Label text="идёт запись" color="0xED0E0E" fontSize="13" verticalCenter="0" fontWeight="bold"/>
+				</s:Group>
+				<!--s:BitmapImage source="@Embed('../assets/reccording_image.png')" /-->
+				<mx:UIComponent id="blinkedUI" width="19" height="19" />
+			</s:HGroup>
+		</s:Group>
+		
+		<s:Group id="imageGroup" height="283" width="100%">
+			<s:Rect width="100%" height="100%" >
+				<s:filters>
+					<s:DropShadowFilter angle="90" blurX="6" blurY="6" distance="0" quality="1" />
+				</s:filters>
+				<s:fill>
+					<s:SolidColor color="0xFFFFFF" alpha="1"/>
+				</s:fill>
+			</s:Rect>
+			<mx:UIComponent id="bgImage" width="100%" height="100%"/>
+			
+			<s:BusyIndicator id="busyIndicator" horizontalCenter="0" verticalCenter="0"/>
+			
+			<s:Group horizontalCenter="0" verticalCenter="0" id="countodownGroup" visible="false" includeIn="enterState">
+				<s:BitmapImage  source="@Embed('../assets/countdown_bg.png')" />
+				<s:Label id="countdownLabel" text="3" color="0xFFFFFF" fontSize="94" textAlign="center" top="30" width="130" fontWeight="bold"/>
+			</s:Group>	
+			
+		</s:Group>
+		
+		<s:Group id="bottomGroup" height="36" width="100%">
+			<s:Group id="reccordGroup" includeIn="reccordGroup" width="100%">
+				<s:HGroup gap="15" left="0">
+					<s:Group>
+						<s:Button id="reccordButton"
+								  skinClass="ru.teachbase.skins.ReccordButtonSkin" 
+								  width="102" height="34" label="Записать"
+								  includeIn="enterState" click="onButtonClick(event)"/>
+						<s:Button id="stopReccordButton"
+								  skinClass="ru.teachbase.skins.GreenButtonSkin" 
+								  width="102" height="34" label="Остановить"
+								  includeIn="recordState" click="onButtonClick(event)"/>
+					</s:Group>
+					<s:Group height="100%">
+						<s:Label id="currentTimeField" fontSize="22" fontWeight="bold" text="00:00" verticalCenter="0"/>
+					</s:Group>
+				</s:HGroup>
+				
+				<s:Label fontSize="12" text="запись может длиться до 5 минут" color="0x707070" right="0" verticalCenter="0"/>
+			</s:Group>
+			<s:HGroup id="playGroup" includeIn="playGrouop" width="100%" gap="6" >
+				<s:Group>
+					<s:Button id="playButton" skinClass="ru.teachbase.skins.PlayButtonSkin" 
+							  click="onButtonClick(event)"/>
+					<s:Button id="pauseButton" visible="false" skinClass="ru.teachbase.skins.PauseButtonSkin"
+							  click="onButtonClick(event)"/>
+				</s:Group>
+				<comp:ProgressBar id="playProgressBar" width="212"/>
+				<s:Button id="deleteButton" skinClass="ru.teachbase.skins.DeleteButtonSkin" click="onButtonClick(event)"/>
+				<s:Button id="saveButton" label="Сохранить" skinClass="ru.teachbase.skins.GreenButtonSkin" width="102"  click="onButtonClick(event)"/>
+			</s:HGroup>
+			<s:Group width="100%" height="100%" includeIn="saveState">
+				<comp:SaveProgressBar id="saveProgressBar" width="100%" />
+			</s:Group>
+		</s:Group>
+	</s:VGroup>
+
+	
+</s:Application>

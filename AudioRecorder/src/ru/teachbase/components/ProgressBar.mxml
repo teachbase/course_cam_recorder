@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" 
+		 xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="34" creationComplete="init()">
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	
+	<fx:Script>
+		<![CDATA[
+			import ru.teachbase.utils.Strings;
+			
+			private var _maxValue:int = 300;
+		
+			[Bindable]
+			private var _mask:Sprite;
+			
+			private function init():void{
+				trace("init");
+				_mask = new Sprite;
+				_mask.graphics.beginFill(0xFFFFFF,1)
+				_mask.graphics.drawRect(0,0,1,34);
+				_mask.graphics.endFill();
+				_mask.width = 1;
+			}
+			
+			public function set progress(val:int):void{
+				if (prLabel) {
+					prLabel.text = Strings.digits(val)+" / "+ Strings.digits(_maxValue);
+				}
+				
+				if (_mask) {
+					_mask.width =	this.width/_maxValue * val;
+					trace("mask width " ,_mask.width )	
+				}
+				
+			}
+			
+			
+			public function set maxProgress(val:int):void{
+				_maxValue = val;
+				if (prLabel) {
+					prLabel.text = "00:00 / "+ Strings.digits(_maxValue);
+				}
+			}
+		]]>
+	</fx:Script>
+	
+	
+	
+	<s:HGroup width="100%" top="0" left="0" right="0" height="34" gap="0">
+		<s:Group>
+			<s:BitmapImage source="@Embed('../assets/progressbar_bg_left.png')" height="34" width="4"/>
+		</s:Group>
+		<s:Group width="100%">
+			<s:Image source="@Embed('../assets/progressbar_bg_center.png')" scaleMode="stretch" height="34" width="100%"/>
+		</s:Group>
+		<s:Group>
+			<s:BitmapImage source="@Embed('../assets/progressbar_bg_right.png')" height="34" width="4"/>
+		</s:Group>
+	</s:HGroup>
+	
+	
+	<s:HGroup width="100%" top="0" left="0" right="0" height="34" gap="0" mask="{_mask}">
+		<s:Group>
+			<s:BitmapImage source="@Embed('../assets/progressbar_pr_left.png')" height="34" width="4"/>
+		</s:Group>
+		<s:Group width="100%">
+			<s:Image source="@Embed('../assets/progressbar_pr_center.png')" scaleMode="stretch" height="34" width="100%"/>
+		</s:Group>
+		<s:Group>
+			<s:BitmapImage source="@Embed('../assets/progressbar_pr_right.png')" height="34" width="4"/>
+		</s:Group>
+	</s:HGroup>
+	
+	<s:Label id="prLabel" text="00:00 / 00:00" horizontalCenter="0" textAlign="center" fontSize="24" color="0xFFFFFF"
+			 fontWeight="bold" verticalAlign="middle" verticalCenter="0" />
+
+</s:Group>
