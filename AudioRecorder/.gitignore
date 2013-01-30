@@ -3,6 +3,6 @@
 /bin-release
 /html-template
 /.actionScriptProperties
-/.DS_Store
+.DS_Store
 /.flexProperties
 /.project
